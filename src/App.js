@@ -32,6 +32,7 @@ export default function App() {
   const [lastResult, setLastResult] = useState(null); // {text, ok, slow}
   const [questionStart, setQuestionStart] = useState(null);
   const [timeStats, setTimeStats] = useState({ totalMs: 0, count: 0, maxMs: 0 });
+  const lastPairRef = useRef(null);
 
   const reviewEntries = useMemo(() => buildReviewEntries(questionStats), [questionStats]);
 
@@ -53,25 +54,38 @@ export default function App() {
   const answer = useMemo(() => a * b, [a, b]);
   const inputRef = useRef(null);
 
-  const pickNextPair = (statsSnapshot) => {
+  const pickNextPair = (statsSnapshot, lastPair) => {
     const entries = buildReviewEntries(statsSnapshot);
     const pending = entries.filter((stat) => stat.correct < REVIEW_CORRECT_TARGET);
-    const shouldUseReview = pending.length > 0 && Math.random() < 0.7;
+    const reviewProbability = pending.length > 0 ? 0.45 : 0;
+    const shouldUseReview = pending.length > 0 && Math.random() < reviewProbability;
 
     if (shouldUseReview) {
-      const randomReview = pending[Math.floor(Math.random() * pending.length)];
+      const pool = pending.filter(
+        (stat) => !(lastPair && stat.a === lastPair.a && stat.b === lastPair.b)
+      );
+      const choicePool = pool.length > 0 ? pool : pending;
+      const randomReview = choicePool[Math.floor(Math.random() * choicePool.length)];
       return { nextA: randomReview.a, nextB: randomReview.b };
     }
 
-    return { nextA: randInt(2, 10), nextB: randInt(2, 10) };
+    let candidateA;
+    let candidateB;
+    do {
+      candidateA = randInt(2, 10);
+      candidateB = randInt(2, 10);
+    } while (lastPair && candidateA === lastPair.a && candidateB === lastPair.b);
+
+    return { nextA: candidateA, nextB: candidateB };
   };
 
   const applyNextQuestion = (statsSnapshot) => {
-    const { nextA, nextB } = pickNextPair(statsSnapshot);
+    const { nextA, nextB } = pickNextPair(statsSnapshot, lastPairRef.current);
     setA(nextA);
     setB(nextB);
     setInput("");
     setQuestionStart(Date.now());
+    lastPairRef.current = { a: nextA, b: nextB };
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -202,8 +216,11 @@ export default function App() {
         .card{background:#fff;border:1px solid #e5e7eb;border-radius:24px;padding:24px;box-shadow:0 12px 30px rgba(79,70,229,.08)}
         .center{text-align:center}
         .question{font-weight:900;color:var(--indigo);line-height:1.1;margin:12px 0;font-size:clamp(64px,10vw,120px)}
-        .input{width:min(460px,80vw);text-align:center;font-size:clamp(40px,7vw,72px);font-weight:800;border:2px solid #c7d2fe;border-radius:18px;padding:12px 16px;outline:none;background:#eef2ff;font-family:"Noto Naskh Arabic","Segoe UI",sans-serif}
+        .inputRow{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:16px}
+        .input{width:min(360px,70vw);text-align:center;font-size:clamp(40px,7vw,72px);font-weight:800;border:2px solid #c7d2fe;border-radius:18px;padding:12px 16px;outline:none;background:#eef2ff;font-family:"Noto Naskh Arabic","Segoe UI",sans-serif}
         .input:focus{box-shadow:0 0 0 8px rgba(99,102,241,.15);border-color:#818cf8}
+        .submit{background:#2563eb}
+        .submit:hover{background:#1d4ed8}
         .toast{margin:8px auto 0;max-width:720px;border-radius:16px;padding:10px 14px;font-weight:800}
         .ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
         .bad{background:#fff1f2;color:#991b1b;border:1px solid #fecaca}
@@ -247,7 +264,7 @@ export default function App() {
               <div className="reviewBanner">وضع المراجعة مُفعل — تظهر الأخطاء أدناه لمراجعتها.</div>
             )}
             {!isFinished && (
-              <div className="hint">اكتب الجواب واضغط <b>Enter</b> مرة واحدة — سيتم التحقق والانتقال للسؤال التالي فورًا.</div>
+              <div className="hint">اكتب الجواب ثم اضغط <b>Enter</b> أو زر <b>تحقق</b> — سيتم الانتقال للسؤال التالي تلقائيًا.</div>
             )}
 
             {/* المسألة */}
@@ -256,21 +273,26 @@ export default function App() {
             </div>
 
             {!isFinished && (
-              <input
-                ref={inputRef}
-                autoFocus
-                inputMode="numeric"
-                pattern="[0-9٠-٩]*"
-                placeholder={toArabicIndic(0)}
-                className="input"
-                value={input}
-                onChange={(e) => {
-                  const raw = e.target.value.replace(/[^0-9٠-٩]/g, "");
-                  const western = raw.replace(/[٠-٩]/g, (d) => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[d]));
-                  setInput(toArabicIndic(western));
-                }}
-                onKeyDown={handleKeyDown}
-              />
+              <div className="inputRow">
+                <input
+                  ref={inputRef}
+                  autoFocus
+                  inputMode="numeric"
+                  pattern="[0-9٠-٩]*"
+                  placeholder={toArabicIndic(0)}
+                  className="input"
+                  value={input}
+                  onChange={(e) => {
+                    const raw = e.target.value.replace(/[^0-9٠-٩]/g, "");
+                    const western = raw.replace(/[٠-٩]/g, (d) => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[d]));
+                    setInput(toArabicIndic(western));
+                  }}
+                  onKeyDown={handleKeyDown}
+                />
+                <button className="btn submit" type="button" onClick={submitAnswer}>
+                  تحقق
+                </button>
+              </div>
             )}
 
             {/* شريط نتيجة آخر إجابة */}
@@ -283,7 +305,6 @@ export default function App() {
             {/* مؤشرات الأداء */}
             <div className="kpis">
               <div className="kpi"><div className="lbl">الإجمالي</div><div className="val">{toArabicIndic(total)}</div></div>
-              <div className="kpi"><div className="lbl">صحيح</div><div className="val">{toArabicIndic(correct)}</div></div>
               <div className="kpi"><div className="lbl">النسبة</div><div className="val">{toArabicIndic(percent)}%</div></div>
               <div className="kpi"><div className="lbl">متوسط الزمن</div><div className="val">{timeStats.count === 0 ? '—' : `${formatSeconds(avgTimeMs)} ث`}</div></div>
               <div className="kpi"><div className="lbl">أطول زمن</div><div className="val">{timeStats.count === 0 ? '—' : `${formatSeconds(timeStats.maxMs)} ث`}</div></div>

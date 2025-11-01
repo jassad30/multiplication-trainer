@@ -14,6 +14,11 @@ const fromArabicIndic = (s) => {
 const fromArabicIndicSafe = (s) => s.replace(/[٠-٩]/g, (d) => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[d]));
 
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
+const EXPECTED_TIME_MS = 5000;
+const formatSeconds = (ms) => {
+  const seconds = (ms / 1000).toFixed(1);
+  return toArabicIndic(seconds).replace(".", "٫");
+};
 
 export default function App() {
   const [a, setA] = useState(2);
@@ -21,10 +26,12 @@ export default function App() {
   const [input, setInput] = useState("");         // نخزنها دومًا كأرقام شرقية
   const [total, setTotal] = useState(0);
   const [correct, setCorrect] = useState(0);
-  const [wrongList, setWrongList] = useState([]);   // {q, user, ans}
-  const [history, setHistory] = useState([]);       // {q, ok}
+  const [wrongList, setWrongList] = useState([]);   // {q, user, ans, timeMs, slow}
+  const [history, setHistory] = useState([]);       // {q, ok, timeMs, slow}
   const [isFinished, setIsFinished] = useState(false);
-  const [lastResult, setLastResult] = useState(null); // {text, ok}
+  const [lastResult, setLastResult] = useState(null); // {text, ok, slow}
+  const [questionStart, setQuestionStart] = useState(null);
+  const [timeStats, setTimeStats] = useState({ totalMs: 0, count: 0, maxMs: 0 });
 
   const answer = useMemo(() => a * b, [a, b]);
   const inputRef = useRef(null);
@@ -33,6 +40,7 @@ export default function App() {
     setA(randInt(2, 10));
     setB(randInt(2, 10));
     setInput("");
+    setQuestionStart(Date.now());
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -47,19 +55,39 @@ export default function App() {
     if (normalized === "") return;
     const userVal = Number(normalized);
     const ok = userVal === answer;
+    const now = Date.now();
+    const elapsedMs = questionStart ? now - questionStart : 0;
+    const slow = elapsedMs > EXPECTED_TIME_MS;
 
     const qTxt = `${toArabicIndic(a)} × ${toArabicIndic(b)} = ${toArabicIndic(userVal)}`;
-    setHistory((h) => [{ q: qTxt, ok }, ...h].slice(0, 80));
+    setHistory((h) => [{ q: qTxt, ok, timeMs: elapsedMs, slow }, ...h].slice(0, 80));
     setTotal((t) => t + 1);
     if (ok) setCorrect((c) => c + 1);
-    else setWrongList((w) => [{ q: `${toArabicIndic(a)} × ${toArabicIndic(b)}`, user: toArabicIndic(userVal), ans: answer }, ...w]);
+    else setWrongList((w) => [
+      {
+        q: `${toArabicIndic(a)} × ${toArabicIndic(b)}`,
+        user: toArabicIndic(userVal),
+        ans: answer,
+        timeMs: elapsedMs,
+        slow
+      },
+      ...w
+    ]);
+
+    setTimeStats((prev) => {
+      const totalMs = prev.totalMs + elapsedMs;
+      const count = prev.count + 1;
+      const maxMs = Math.max(prev.maxMs, elapsedMs);
+      return { totalMs, count, maxMs };
+    });
 
     // شريط نتيجة فوري يعرض السؤال السابق مع الحكم
     setLastResult({
       ok,
+      slow,
       text: ok
-        ? `✔️ صحيح — ${toArabicIndic(a)} × ${toArabicIndic(b)} = ${toArabicIndic(answer)}`
-        : `❌ خطأ — ${toArabicIndic(a)} × ${toArabicIndic(b)} = ${toArabicIndic(userVal)} (الصحيح: ${toArabicIndic(answer)})`
+        ? `✔️ صحيح — ${toArabicIndic(a)} × ${toArabicIndic(b)} = ${toArabicIndic(answer)} — ⏱️ ${formatSeconds(elapsedMs)} ث`
+        : `❌ خطأ — ${toArabicIndic(a)} × ${toArabicIndic(b)} = ${toArabicIndic(userVal)} (الصحيح: ${toArabicIndic(answer)}) — ⏱️ ${formatSeconds(elapsedMs)} ث`
     });
 
     // سؤال جديد فورًا — كبسة Enter واحدة تكفي
@@ -79,21 +107,25 @@ export default function App() {
     setHistory([]);
     setIsFinished(false);
     setLastResult(null);
+    setTimeStats({ totalMs: 0, count: 0, maxMs: 0 });
     newQuestion();
   };
 
   const finish = () => {
     setIsFinished(true);
     setLastResult(null); // نخفي الشريط
+    setQuestionStart(null);
     setTimeout(() => inputRef.current?.blur(), 0);
   };
 
   const resume = () => {
     setIsFinished(false);
+    setQuestionStart(Date.now());
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
   const percent = total === 0 ? 0 : Math.round((correct / total) * 100);
+  const avgTimeMs = timeStats.count === 0 ? 0 : timeStats.totalMs / timeStats.count;
 
   return (
     <div dir="rtl" className="app">
@@ -117,7 +149,8 @@ export default function App() {
         .toast{margin:8px auto 0;max-width:720px;border-radius:16px;padding:10px 14px;font-weight:800}
         .ok{background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0}
         .bad{background:#fff1f2;color:#991b1b;border:1px solid #fecaca}
-        .kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:18px}
+        .toast.slow{background:#fff7ed;color:#9a3412;border:1px solid #fdba74}
+        .kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:18px}
         .kpi{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border-radius:20px;padding:16px;text-align:center}
         .kpi .lbl{font-size:12px;opacity:.9}.kpi .val{font-size:28px;font-weight:900}
         .actions{display:flex;justify-content:center;gap:10px;margin-top:14px;flex-wrap:wrap}
@@ -126,6 +159,7 @@ export default function App() {
         .item{border:1px solid #e5e7eb;background:#f9fafb;border-radius:14px;padding:10px 12px;font-weight:700}
         .item.ok{background:#ecfdf5;border-color:#a7f3d0;color:#065f46}
         .item.bad{background:#fff1f2;border-color:#fecaca;color:#991b1b}
+        .item.slow{background:#fff7ed;border-color:#fdba74;color:#9a3412}
         .hint{color:#6b7280;font-size:14px}
         .badge{display:inline-block;margin-inline-start:8px;padding:2px 8px;border-radius:9999px;background:#eef2ff;color:#4338ca;font-weight:800}
         .reviewBanner{margin:6px 0 12px;background:#fef3c7;border:1px solid #fde68a;border-radius:14px;padding:10px 12px;color:#92400e;font-weight:700}
@@ -183,7 +217,7 @@ export default function App() {
 
             {/* شريط نتيجة آخر إجابة */}
             {lastResult && (
-              <div className={`toast ${lastResult.ok ? 'ok' : 'bad'}`}>
+              <div className={`toast ${lastResult.ok ? 'ok' : 'bad'} ${lastResult.slow ? 'slow' : ''}`}>
                 {lastResult.text}
               </div>
             )}
@@ -193,6 +227,8 @@ export default function App() {
               <div className="kpi"><div className="lbl">الإجمالي</div><div className="val">{toArabicIndic(total)}</div></div>
               <div className="kpi"><div className="lbl">صحيح</div><div className="val">{toArabicIndic(correct)}</div></div>
               <div className="kpi"><div className="lbl">النسبة</div><div className="val">{toArabicIndic(percent)}%</div></div>
+              <div className="kpi"><div className="lbl">متوسط الزمن</div><div className="val">{timeStats.count === 0 ? '—' : `${formatSeconds(avgTimeMs)} ث`}</div></div>
+              <div className="kpi"><div className="lbl">أطول زمن</div><div className="val">{timeStats.count === 0 ? '—' : `${formatSeconds(timeStats.maxMs)} ث`}</div></div>
             </div>
           </div>
 
@@ -205,8 +241,9 @@ export default function App() {
               ) : (
                 <ul className="list">
                   {history.map((h, idx) => (
-                    <li key={idx} className={`item ${h.ok ? 'ok' : 'bad'}`}>
-                      {h.q} — {h.ok ? 'صحيح' : 'خطأ'}
+                    <li key={idx} className={`item ${h.ok ? 'ok' : 'bad'} ${h.slow ? 'slow' : ''}`}>
+                      {h.q} — {h.ok ? 'صحيح' : 'خطأ'} — ⏱️ {formatSeconds(h.timeMs)} ث
+                      {h.slow && <span style={{ marginInlineStart: 8 }}>⏰</span>}
                     </li>
                   ))}
                 </ul>
@@ -220,8 +257,9 @@ export default function App() {
               ) : (
                 <ul className="list">
                   {wrongList.map((w, i) => (
-                    <li key={i} className="item bad">
+                    <li key={i} className={`item bad ${w.slow ? 'slow' : ''}`}>
                       {w.q} <span style={{color:"#9ca3af"}}>=</span> {w.user} <span className="hint">(الصحيح: {toArabicIndic(w.ans)})</span>
+                      <div className="hint">⏱️ {formatSeconds(w.timeMs)} ث{w.slow ? ' — استغرق وقتًا أطول من المتوقع' : ''}</div>
                     </li>
                   ))}
                 </ul>

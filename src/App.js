@@ -5,10 +5,6 @@ const toArabicIndic = (n) => {
   const map = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
   return String(n).replace(/[0-9]/g, (d) => map[parseInt(d, 10)]);
 };
-const fromArabicIndic = (s) => {
-  const map = {"٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"8","٨":"8","٩":"9"};
-  // fix mapping typo: ensure ٧ -> 7
-};
 
 // نصحّح خريطة التحويل بشكل صحيح
 const fromArabicIndicSafe = (s) => s.replace(/[٠-٩]/g, (d) => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[d]));

@@ -33,6 +33,7 @@ export default function App() {
   const [questionStart, setQuestionStart] = useState(null);
   const [timeStats, setTimeStats] = useState({ totalMs: 0, count: 0, maxMs: 0 });
   const lastPairRef = useRef(null);
+  const consecutiveNonReviewRef = useRef(0);
 
   const reviewEntries = useMemo(() => buildReviewEntries(questionStats), [questionStats]);
 
@@ -57,8 +58,15 @@ export default function App() {
   const pickNextPair = (statsSnapshot, lastPair) => {
     const entries = buildReviewEntries(statsSnapshot);
     const pending = entries.filter((stat) => stat.correct < REVIEW_CORRECT_TARGET);
-    const reviewProbability = pending.length > 0 ? 0.45 : 0;
-    const shouldUseReview = pending.length > 0 && Math.random() < reviewProbability;
+    const hasPending = pending.length > 0;
+
+    if (!hasPending) {
+      consecutiveNonReviewRef.current = 0;
+    }
+
+    const reviewProbability = hasPending ? 0.3 : 0;
+    const forceReview = hasPending && consecutiveNonReviewRef.current >= 3;
+    const shouldUseReview = hasPending && (forceReview || Math.random() < reviewProbability);
 
     if (shouldUseReview) {
       const pool = pending.filter(
@@ -66,7 +74,12 @@ export default function App() {
       );
       const choicePool = pool.length > 0 ? pool : pending;
       const randomReview = choicePool[Math.floor(Math.random() * choicePool.length)];
+      consecutiveNonReviewRef.current = 0;
       return { nextA: randomReview.a, nextB: randomReview.b };
+    }
+
+    if (hasPending) {
+      consecutiveNonReviewRef.current += 1;
     }
 
     let candidateA;
@@ -180,6 +193,7 @@ export default function App() {
     setIsFinished(false);
     setLastResult(null);
     setTimeStats({ totalMs: 0, count: 0, maxMs: 0 });
+    consecutiveNonReviewRef.current = 0;
     applyNextQuestion({});
   };
 

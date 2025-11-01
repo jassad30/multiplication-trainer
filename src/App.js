@@ -5,16 +5,16 @@ const toArabicIndic = (n) => {
   const map = ["٠","١","٢","٣","٤","٥","٦","٧","٨","٩"];
   return String(n).replace(/[0-9]/g, (d) => map[parseInt(d, 10)]);
 };
-const fromArabicIndic = (s) => {
-  const map = {"٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"8","٨":"8","٩":"9"};
-  // fix mapping typo: ensure ٧ -> 7
-};
-
-// نصحّح خريطة التحويل بشكل صحيح
-const fromArabicIndicSafe = (s) => s.replace(/[٠-٩]/g, (d) => ({'٠':'0','١':'1','٢':'2','٣':'3','٤':'4','٥':'5','٦':'6','٧':'7','٨':'8','٩':'9'}[d]));
+const fromArabicIndic = (s) =>
+  s.replace(/[٠-٩]/g, (d) => ({"٠":"0","١":"1","٢":"2","٣":"3","٤":"4","٥":"5","٦":"6","٧":"7","٨":"8","٩":"9"}[d]));
 
 const randInt = (min, max) => Math.floor(Math.random() * (max - min + 1)) + min;
 const EXPECTED_TIME_MS = 5000;
+const REVIEW_CORRECT_TARGET = 2;
+const buildReviewEntries = (stats) =>
+  Object.values(stats)
+    .filter((stat) => stat.wrong > 0)
+    .map((stat) => ({ ...stat }));
 const formatSeconds = (ms) => {
   const seconds = (ms / 1000).toFixed(1);
   return toArabicIndic(seconds).replace(".", "٫");
@@ -26,22 +26,57 @@ export default function App() {
   const [input, setInput] = useState("");         // نخزنها دومًا كأرقام شرقية
   const [total, setTotal] = useState(0);
   const [correct, setCorrect] = useState(0);
-  const [wrongList, setWrongList] = useState([]);   // {q, user, ans, timeMs, slow}
+  const [questionStats, setQuestionStats] = useState({}); // key -> aggregated stats
   const [history, setHistory] = useState([]);       // {q, ok, timeMs, slow}
   const [isFinished, setIsFinished] = useState(false);
   const [lastResult, setLastResult] = useState(null); // {text, ok, slow}
   const [questionStart, setQuestionStart] = useState(null);
   const [timeStats, setTimeStats] = useState({ totalMs: 0, count: 0, maxMs: 0 });
 
+  const reviewEntries = useMemo(() => buildReviewEntries(questionStats), [questionStats]);
+
+  const pendingReviewQuestions = useMemo(
+    () => reviewEntries.filter((stat) => stat.correct < REVIEW_CORRECT_TARGET),
+    [reviewEntries]
+  );
+
+  const orderedReviewEntries = useMemo(() => {
+    const pending = [];
+    const completed = [];
+    reviewEntries.forEach((stat) => {
+      if (stat.correct < REVIEW_CORRECT_TARGET) pending.push(stat);
+      else completed.push(stat);
+    });
+    return [...pending, ...completed];
+  }, [reviewEntries]);
+
   const answer = useMemo(() => a * b, [a, b]);
   const inputRef = useRef(null);
 
-  const newQuestion = () => {
-    setA(randInt(2, 10));
-    setB(randInt(2, 10));
+  const pickNextPair = (statsSnapshot) => {
+    const entries = buildReviewEntries(statsSnapshot);
+    const pending = entries.filter((stat) => stat.correct < REVIEW_CORRECT_TARGET);
+    const shouldUseReview = pending.length > 0 && Math.random() < 0.7;
+
+    if (shouldUseReview) {
+      const randomReview = pending[Math.floor(Math.random() * pending.length)];
+      return { nextA: randomReview.a, nextB: randomReview.b };
+    }
+
+    return { nextA: randInt(2, 10), nextB: randInt(2, 10) };
+  };
+
+  const applyNextQuestion = (statsSnapshot) => {
+    const { nextA, nextB } = pickNextPair(statsSnapshot);
+    setA(nextA);
+    setB(nextB);
     setInput("");
     setQuestionStart(Date.now());
     setTimeout(() => inputRef.current?.focus(), 0);
+  };
+
+  const newQuestion = () => {
+    applyNextQuestion(questionStats);
   };
 
   useEffect(() => {
@@ -51,7 +86,7 @@ export default function App() {
 
   const submitAnswer = () => {
     if (isFinished) return; // لا شيء أثناء المراجعة
-    const normalized = fromArabicIndicSafe(input).trim();
+    const normalized = fromArabicIndic(input).trim();
     if (normalized === "") return;
     const userVal = Number(normalized);
     const ok = userVal === answer;
@@ -63,16 +98,39 @@ export default function App() {
     setHistory((h) => [{ q: qTxt, ok, timeMs: elapsedMs, slow }, ...h].slice(0, 80));
     setTotal((t) => t + 1);
     if (ok) setCorrect((c) => c + 1);
-    else setWrongList((w) => [
-      {
-        q: `${toArabicIndic(a)} × ${toArabicIndic(b)}`,
-        user: toArabicIndic(userVal),
-        ans: answer,
-        timeMs: elapsedMs,
-        slow
-      },
-      ...w
-    ]);
+
+    const key = `${a}x${b}`;
+    const prevStat = questionStats[key] || {
+      a,
+      b,
+      correct: 0,
+      wrong: 0,
+      attempts: 0,
+      slowCount: 0,
+      lastUserAnswer: null,
+      lastWasCorrect: null,
+      lastTimeMs: null
+    };
+
+    const nextStat = {
+      ...prevStat,
+      a,
+      b,
+      correct: prevStat.correct + (ok ? 1 : 0),
+      wrong: prevStat.wrong + (ok ? 0 : 1),
+      attempts: prevStat.attempts + 1,
+      slowCount: prevStat.slowCount + (slow ? 1 : 0),
+      lastUserAnswer: toArabicIndic(userVal),
+      lastWasCorrect: ok,
+      lastTimeMs: elapsedMs
+    };
+
+    const nextQuestionStats = {
+      ...questionStats,
+      [key]: nextStat
+    };
+
+    setQuestionStats(nextQuestionStats);
 
     setTimeStats((prev) => {
       const totalMs = prev.totalMs + elapsedMs;
@@ -91,7 +149,7 @@ export default function App() {
     });
 
     // سؤال جديد فورًا — كبسة Enter واحدة تكفي
-    newQuestion();
+    applyNextQuestion(nextQuestionStats);
   };
 
   const handleKeyDown = (e) => {
@@ -103,12 +161,12 @@ export default function App() {
   const resetAll = () => {
     setTotal(0);
     setCorrect(0);
-    setWrongList([]);
+    setQuestionStats({});
     setHistory([]);
     setIsFinished(false);
     setLastResult(null);
     setTimeStats({ totalMs: 0, count: 0, maxMs: 0 });
-    newQuestion();
+    applyNextQuestion({});
   };
 
   const finish = () => {
@@ -172,7 +230,7 @@ export default function App() {
             {!isFinished ? (
               <>
                 <button className="btn success" onClick={finish}>إنهاء التدريب</button>
-                {wrongList.length > 0 && (
+                {pendingReviewQuestions.length > 0 && (
                   <button className="btn primary" onClick={finish}>مراجعة الأخطاء الآن</button>
                 )}
               </>
@@ -251,17 +309,40 @@ export default function App() {
             </div>
           ) : (
             <div className="card">
-              <h2 className="section-title">الأخطاء للمراجعة <span className="badge">{toArabicIndic(wrongList.length)}</span></h2>
-              {wrongList.length === 0 ? (
+              <h2 className="section-title">الأخطاء للمراجعة <span className="badge">{toArabicIndic(pendingReviewQuestions.length)}</span></h2>
+              {reviewEntries.length === 0 ? (
                 <div className="hint">لا توجد أخطاء — ممتاز! 🌟</div>
               ) : (
                 <ul className="list">
-                  {wrongList.map((w, i) => (
-                    <li key={i} className={`item bad ${w.slow ? 'slow' : ''}`}>
-                      {w.q} <span style={{color:"#9ca3af"}}>=</span> {w.user} <span className="hint">(الصحيح: {toArabicIndic(w.ans)})</span>
-                      <div className="hint">⏱️ {formatSeconds(w.timeMs)} ث{w.slow ? ' — استغرق وقتًا أطول من المتوقع' : ''}</div>
-                    </li>
-                  ))}
+                  {orderedReviewEntries.map((stat) => {
+                    const needsReview = stat.correct < REVIEW_CORRECT_TARGET;
+                    const remaining = Math.max(REVIEW_CORRECT_TARGET - stat.correct, 0);
+                    return (
+                      <li key={`${stat.a}x${stat.b}`} className={`item ${needsReview ? 'bad' : 'ok'}`}>
+                        {toArabicIndic(stat.a)} × {toArabicIndic(stat.b)} <span style={{color:"#9ca3af"}}>=</span> {toArabicIndic(stat.a * stat.b)}
+                        <div className="hint">
+                          ✅ مرات صحيحة: {toArabicIndic(stat.correct)} — ❌ مرات خاطئة: {toArabicIndic(stat.wrong)}
+                        </div>
+                        <div className="hint">
+                          {stat.lastUserAnswer !== null ? (
+                            <>
+                              آخر محاولة: {stat.lastUserAnswer} — {stat.lastWasCorrect ? 'صحيح' : 'خطأ'} — ⏱️ {formatSeconds(stat.lastTimeMs)} ث
+                            </>
+                          ) : (
+                            'لا توجد محاولات بعد'
+                          )}
+                        </div>
+                        {stat.slowCount > 0 && (
+                          <div className="hint">⏰ مرات كان فيها الحل بطيئًا: {toArabicIndic(stat.slowCount)}</div>
+                        )}
+                        {needsReview ? (
+                          <div className="hint">🔁 يحتاج إلى {toArabicIndic(remaining)} إجابة صحيحة إضافية لإكمال المراجعة.</div>
+                        ) : (
+                          <div className="hint">🎉 تمت المراجعة بنجاح!</div>
+                        )}
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>
